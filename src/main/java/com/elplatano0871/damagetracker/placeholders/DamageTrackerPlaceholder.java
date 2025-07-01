@@ -6,11 +6,8 @@ import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.jetbrains.annotations.NotNull;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.HashMap;
-import java.util.stream.Collectors;
+
+import java.util.*;
 
 /**
  * Placeholder expansion for the DamageTracker plugin.
@@ -68,66 +65,81 @@ public class DamageTrackerPlaceholder extends PlaceholderExpansion {
      */
     @Override
     public String onRequest(OfflinePlayer player, @NotNull String identifier) {
-        // Handle leaderboard placeholders (from DamageLeaderboardExpansion)
         if (identifier.startsWith("damagetop_")) {
-            String bossName = identifier.substring(10); 
+            String bossName = identifier.substring("damagetop_".length());
             return databaseManager.getFormattedLeaderboard(bossName);
         }
 
-        // Handle general damage placeholders (original functionality)
-        Map<UUID, Double> totalDamageMap = new HashMap<>();
-        Map<UUID, Map<UUID, Double>> allDamageData = plugin.getAllDamageData();
-
-        for (Map<UUID, Double> damageMap : allDamageData.values()) {
-            for (Map.Entry<UUID, Double> entry : damageMap.entrySet()) {
-                totalDamageMap.merge(entry.getKey(), entry.getValue(), Double::sum);
-            }
-        }
-
-        List<Map.Entry<UUID, Double>> topThree = totalDamageMap.entrySet().stream()
-                .sorted((e1, e2) -> e2.getValue().compareTo(e1.getValue()))
-                .limit(3)
-                .collect(Collectors.toList());
-
-        String[] parts = identifier.split("_");
+        String[] parts = identifier.split("_", 2);
         if (parts.length != 2) return null;
 
-        int position;
-        try {
-            position = Integer.parseInt(parts[1]);
-        } catch (NumberFormatException e) {
-            return null;
-        }
+        String category = parts[0];
+        String type = parts[1];
 
-        if (position < 1 || position > 3) return null;
-        if (topThree.size() < position) return "N/A";
+        switch (category) {
+            case "top" -> {
+                Integer index = parseIndex(type);
+                if (index == null) return null;
 
-        Map.Entry<UUID, Double> entry = topThree.get(position - 1);
-        UUID playerId = entry.getKey();
-        Double damage = entry.getValue();
+                List<Map.Entry<UUID, Double>> topThree = getTopEntries(3);
+                if (index < 0 || index >= topThree.size()) return "N/A";
 
-        return switch (parts[0]) {
-            case "top" -> parts[1].endsWith("name") ?
-                    Bukkit.getOfflinePlayer(playerId).getName() :
-                    parts[1].endsWith("damage") ?
-                            String.format("%.2f", damage) :
-                            null;
+                Map.Entry<UUID, Double> entry = topThree.get(index);
+                return type.endsWith("name")
+                        ? Optional.ofNullable(Bukkit.getOfflinePlayer(entry.getKey()).getName()).orElse("Unknown")
+                        : String.format("%.2f", entry.getValue());
+            }
+
             case "player" -> {
-                if (player == null) yield null;
-                yield switch (parts[1]) {
-                    case "damage" ->
-                            String.format("%.2f", totalDamageMap.getOrDefault(player.getUniqueId(), 0.0));
+                if (player == null) return null;
+                UUID playerId = player.getUniqueId();
+                Map<UUID, Double> totalDamageMap = getTotalDamageMap();
+
+                return switch (type) {
+                    case "damage" -> String.format("%.2f", totalDamageMap.getOrDefault(playerId, 0.0));
                     case "position" -> {
-                        int playerPosition = topThree.indexOf(topThree.stream()
-                                .filter(e -> e.getKey().equals(player.getUniqueId()))
-                                .findFirst()
-                                .orElse(null)) + 1;
-                        yield playerPosition > 0 ? String.valueOf(playerPosition) : "N/A";
+                        List<Map.Entry<UUID, Double>> topThree = getTopEntries(3);
+                        int pos = 1;
+                        for (Map.Entry<UUID, Double> entry : topThree) {
+                            if (entry.getKey().equals(playerId)) {
+                                yield String.valueOf(pos);
+                            }
+                            pos++;
+                        }
+                        yield "N/A";
                     }
                     default -> null;
                 };
             }
-            default -> null;
-        };
+
+            default -> {
+                return null;
+            }
+        }
     }
+
+    private Map<UUID, Double> getTotalDamageMap() {
+        Map<UUID, Double> totalDamageMap = new HashMap<>();
+        plugin.getAllDamageData().values().forEach(damageMap ->
+                damageMap.forEach((uuid, damage) ->
+                        totalDamageMap.merge(uuid, damage, Double::sum)));
+        return totalDamageMap;
+    }
+
+    private List<Map.Entry<UUID, Double>> getTopEntries(int limit) {
+        return getTotalDamageMap().entrySet().stream()
+                .sorted(Map.Entry.<UUID, Double>comparingByValue().reversed())
+                .limit(limit)
+                .toList();
+    }
+
+    private Integer parseIndex(String type) {
+        if (!(type.endsWith("name") || type.endsWith("damage"))) return null;
+        try {
+            return Integer.parseInt(type.replaceAll("[^0-9]", "")) - 1;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
 }
