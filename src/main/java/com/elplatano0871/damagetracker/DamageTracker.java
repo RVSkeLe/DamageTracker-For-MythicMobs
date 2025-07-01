@@ -12,6 +12,7 @@ import com.elplatano0871.damagetracker.utils.MessageUtils;
 import com.elplatano0871.damagetracker.managers.HologramManager;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
 import net.milkbowl.vault.chat.Chat;
 import java.util.*;
@@ -54,7 +55,10 @@ public class DamageTracker extends JavaPlugin {
         displayAsciiArt();
         
         // Initialize hologram manager
-        hologramManager = new HologramManager(this);
+        PluginManager pm = getServer().getPluginManager();
+        if (pm.isPluginEnabled("FancyHolograms")) {
+            hologramManager = new HologramManager(this);
+        }
     }
 
     @Override
